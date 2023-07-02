@@ -1,0 +1,66 @@
+# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+
+# Parameters
+nc: 80  # number of classes
+depth_multiple: 0.33  # model depth multiple
+width_multiple: 0.50  # layer channel multiple
+anchors:
+  - [10,13, 16,30, 33,23]  # P3/8
+  - [30,61, 62,45, 59,119]  # P4/16
+  - [116,90, 156,198, 373,326]  # P5/32
+
+# YOLOv5 v6.0 backbone
+backbone:
+  # [from, number, module, args]
+  [[-1, 1, Conv, [64, 6, 2, 2]],  # 0-P1/2
+   [-1, 1, GhostConv_add_concat, [128, 3, 2]],  # 1-P2/4
+   [-1, 1, GAhostBottleneckELANStack1_ema, [128]],
+   [-1, 1, GhostConv_add_concat, [256, 3, 2]],  # 3-P3/8
+   [-1, 1, GAhostBottleneckELANStack1_ema, [256]],  # 4 80 80 
+   [-1, 1, GhostConv_add_concat, [512, 3, 2]],  # 5-P4/16
+   [-1, 1, GAhostBottleneckELANStack1_ema, [512]],  # 6 40 40
+   [-1, 1, GhostConv_add_concat, [1024, 3, 2]],  # 7-P5/32
+   [-1, 3, GhostELANFPNv2, [1024]],
+   [-1, 1, SPPF, [1024, 5]],  # 9
+  ]
+
+# YOLOv5 v6.0 head
+head:
+  [[-1, 1, GhostConv_add_concat, [512, 1, 1]], #10 20 20 256
+
+  [4, 1, nn.AvgPool2d, [2, 2, 0]], # 40 40 256  11
+  [6, 1, GhostConv_add_concat, [256, 1, 1]], # 40 40 128  12
+  # [-1, 1, CARAFE, []], # 80 80 128 13
+  [-1, 1, nn.Upsample, [None, 2, 'nearest']],
+  [[11, 6], 1, Concat, [1]], # 40 40 512  14
+  [[13, 4], 1, Concat, [1]], # 80 80 256  15
+
+  [14, 1, GhostELANFPNEMA, [512, 1, 1]], # 40 40 256  16
+  [15, 1, GhostELANFPNEMA, [256, 1, 1]], #80 80 128  17
+
+  [16, 1, nn.AvgPool2d, [2, 2, 0]], # 20 20 128   18
+  [17, 1, nn.AvgPool2d, [4, 4, 0]], # 20 20 128   19
+
+  [[-1, -2, 10], 1, Concat, [1]], # 20 20 512   20
+  [-1, 1, GhostELANFPNv2, [1024]], # 20 20 512  P5  21
+
+  [10, 1, GhostConv_add_concat, [128, 1, 1]], # 20 20 64  22
+  # [-1, 1, CARAFE, []], # 40 40 64   23
+  [-1, 1, nn.Upsample, [None, 2, 'nearest']],
+  [17, 1, nn.AvgPool2d, [2, 2, 0]], # 40 40 64 24
+  [[-1, -2, 16], 1, Concat, [1]], # 40 40 256  25
+  [-1, 1, GhostELANFPNEMA, [512]], # 40 40 256  P4  26
+
+  [10, 1, GhostConv_add_concat, [64, 1, 1]], # 20 20 32  27
+  # [-1, 1, CARAFE, []],  # 40 40 32  28
+  # [-1, 1, CARAFE, []],  # 80 80 32  29
+  [-1, 1, nn.Upsample, [None, 4, 'nearest']],
+  # [-1, 1, nn.Upsample, [2, None, 'nearest']],
+  [16, 1, GhostConv_add_concat, [64, 1, 1]], # 40 40 32  30
+  # [-1, 1, CARAFE, []], # 80 80 32  31
+  [-1, 1, nn.Upsample, [None, 2, 'nearest']],
+  [[-1, -3, 17], 1, Concat, [1]], # 80 80 128 32
+  [-1, 1, GhostELANFPNEMA, [256]],  #33 
+
+   [[21, 26, 32], 1, Detect, [nc, anchors]],  # Detect(P3, P4, P5)
+  ]

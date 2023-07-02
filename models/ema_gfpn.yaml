@@ -1,0 +1,58 @@
+# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+
+# Parameters
+nc: 80  # number of classes
+depth_multiple: 1  # model depth multiple
+width_multiple: 0.50  # layer channel multiple
+anchors:
+  - [10,13, 16,30, 33,23]  # P3/8
+  - [30,61, 62,45, 59,119]  # P4/16
+  - [116,90, 156,198, 373,326]  # P5/32
+
+# YOLOv5 v6.0 backbone
+backbone:
+  # [from, number, module, args]
+  [[-1, 1, Conv, [64, 6, 2, 2]],  # 0-P1/2
+   [-1, 1, GhostConv_add_concat, [128, 3, 2]],  # 1-P2/4
+   [-1, 1, GAhostBottleneckELANStack1_ema, [128]],
+   [-1, 1, GhostConv_add_concat, [256, 3, 2]],  # 3-P3/8
+   [-1, 1, GAhostBottleneckELANStack1_ema, [256]],
+   [-1, 1, GhostConv_add_concat, [512, 3, 2]],  # 5-P4/16
+   [-1, 1, GAhostBottleneckELANStack1, [512]],
+   [-1, 1, GhostConv_add_concat, [1024, 3, 2]],  # 7-P5/32
+   [-1, 1, GAhostBottleneckELANStack1, [1024]],
+   [-1, 1, SPPF, [1024, 5]],  # 9
+  ]
+
+# DAMO-YOLO GFPN Head
+head:
+  [[-1, 1, GhostConv_add_concat, [512, 1, 1]], # 10
+   [6, 1, nn.AvgPool2d, [3, 2, 1]],
+   [[-1, 10], 1, Concat, [1]],
+   [-1, 1, GAhostBottleneckELANStack1, [1024]], # 13
+
+  #  [-1, 1, nn.Upsample, [None, 2, 'nearest']], #14
+   [-1, 1, CARAFE, []],
+   [4, 1, nn.AvgPool2d, [3, 2, 1]], # 15
+   [[14, -1, 6], 1, Concat, [1]],
+   [-1, 1, GAhostBottleneckELANStack1, [512]], # 17
+
+  #  [-1, 1, nn.Upsample, [None, 2, 'nearest']],
+   [-1, 1, CARAFE, []],
+   [[-1, 4], 1, Concat, [1]],
+   [-1, 1, GAhostBottleneckELANStack1_ema, [256]], # 20
+  #  [-1, 1, GAhostBottleneckELANStack1_ema, [256]], # 21  P3/8
+
+  #  [-1, 1, nn.AvgPool2d, [3, 2, 1]], #22
+  #  [20, 1, nn.AvgPool2d, [3, 2, 1]], #23
+  #  [[-1, 22, 17], 1, Concat, [1]], #24
+  #  [-1, 1, GAhostBottleneckELANStack1, [512]], # 25  P4
+
+  #  [17, 1, nn.AvgPool2d, [3, 2, 1]], # 24 26
+  #  [25, 1, nn.AvgPool2d, [3, 2, 1]], # 25 27
+  #  [[13, 26, -1], 1, Concat, [1]],  #28
+  #  [-1, 1, GAhostBottleneckELANStack1, [1024]], # 27 29  P5
+
+  #  [[21, 25, 29], 1, Detect, [nc, anchors]],  # Detect(P3, P4, P5)
+   [[13, 17, 20], 1, Detect, [nc, anchors]],
+  ]
