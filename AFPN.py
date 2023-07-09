@@ -1,3 +1,4 @@
+#==================common.py=====================================
 class Upsample(nn.Module):
     def __init__(self, in_channels, out_channels, scale_factor=2):
         super().__init__()
@@ -168,7 +169,7 @@ class ASFF_3(nn.Module):
         out = self.conv(fused_out_reduced)
 
         return out
-
+#==================yaml=====================================
 # YOLOv5 🚀 by Ultralytics, GPL-3.0 license
 
 # Parameters
@@ -225,7 +226,7 @@ head:
 
   [[26, 27, 28], 1, Detect, [nc, anchors]],
   ]
-
+#==================yolo.py=====================================
 if m in [Conv, GhostConv, BasicBlock]:
 
 elif m is ASFF_2:
