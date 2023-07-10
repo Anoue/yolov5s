@@ -11,28 +11,6 @@ class Upsample(nn.Module):
         x = self.upsample(x)
         return x
     
-class Downsample_x2(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.downsample = nn.Sequential(
-            Conv(in_channels, out_channels, 2, 2, 0)
-        )
-    
-    def forward(self, x):
-        x = self.downsample(x)
-        return x
-    
-class Downsample_x4(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.downsample = nn.Sequential(
-            Conv(in_channels, out_channels, 4, 4, 0)
-        )
-    
-    def forward(self, x):
-        x = self.downsample(x)
-        return x
-    
 class BasicBlock(nn.Module):
     expansion = 1
     def __init__(self, c1, c2):
@@ -58,6 +36,15 @@ class BasicBlock(nn.Module):
 
         return x
 
+class BasicBlock_n(nn.Module):
+    expansion = 1
+    def __init__(self, c1, c2, n=1):
+        super().__init__()
+        self.m = nn.Sequential(*(BasicBlock(c1, c2) for _ in range(n)))
+
+    def forward(self, x):
+        return self.m(x)
+        
 class ASFF_2(nn.Module):
     def __init__(self, c1, c2, level=0):
         super().__init__()
@@ -73,7 +60,7 @@ class ASFF_2(nn.Module):
         if level == 0:
             self.stride_level_1 = Upsample(c1_h, self.inter_dim)
         if level == 1:
-            self.stride_level_0 = Downsample_x2(c1_l, self.inter_dim)
+            self.stride_level_0 = Conv(c1_l, self.inter_dim, 2, 2, 0)
         
         self.weight_level_0 = Conv(self.inter_dim, compress_c, 1, 1)
         self.weight_level_1 = Conv(self.inter_dim, compress_c, 1, 1)
@@ -122,12 +109,12 @@ class ASFF_3(nn.Module):
             self.stride_level_2 = Upsample(c1_h, self.inter_dim, scale_factor=4)
 
         if level == 1:
-            self.stride_level_0 = Downsample_x2(c1_l, self.inter_dim)
+            self.stride_level_0 = Conv(c1_l, self.inter_dim, 2, 2, 0)
             self.stride_level_2 = Upsample(c1_h, self.inter_dim)
 
         if level == 2:
-            self.stride_level_0 = Downsample_x4(c1_l, self.inter_dim)
-            self.stride_level_1 = Downsample_x2(c1_m, self.inter_dim)
+            self.stride_level_0 = Conv(c1_l, self.inter_dim, 4, 4, 0)
+            self.stride_level_1 = Conv(c1_m, self.inter_dim, 2, 2, 0)
         
         self.weight_level_0 = Conv(self.inter_dim, compress_c, 1, 1)
         self.weight_level_1 = Conv(self.inter_dim, compress_c, 1, 1)
@@ -169,73 +156,80 @@ class ASFF_3(nn.Module):
         out = self.conv(fused_out_reduced)
 
         return out
-#==================yaml=====================================
-# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+# #==================yaml=====================================
+# # YOLOv5 🚀 by Ultralytics, GPL-3.0 license
 
-# Parameters
-nc: 80  # number of classes
-depth_multiple: 0.33  # model depth multiple
-width_multiple: 0.50  # layer channel multiple
-anchors:
-  - [10,13, 16,30, 33,23]  # P3/8
-  - [30,61, 62,45, 59,119]  # P4/16
-  - [116,90, 156,198, 373,326]  # P5/32
+# # Parameters
+# nc: 80  # number of classes
+# depth_multiple: 0.33  # model depth multiple
+# width_multiple: 0.50  # layer channel multiple
+# anchors:
+#   - [10,13, 16,30, 33,23]  # P3/8
+#   - [30,61, 62,45, 59,119]  # P4/16
+#   - [116,90, 156,198, 373,326]  # P5/32
 
-# YOLOv5 v6.0 backbone
-backbone:
-  # [from, number, module, args]
-  [[-1, 1, Conv, [64, 6, 2, 2]],  # 0-P1/2  320
-   [-1, 1, Conv, [128, 3, 2]],  # 1-P2/4   160
-   [-1, 3, C3, [128]],     #160
-   [-1, 1, Conv, [256, 3, 2]],  # 3-P3/8  80
-   [-1, 6, C3, [256]],  #80
-   [-1, 1, Conv, [512, 3, 2]],  # 5-P4/16  40
-   [-1, 9, C3, [512]],   #40
-   [-1, 1, Conv, [1024, 3, 2]],  # 7-P5/32  20
-   [-1, 3, C3, [1024]],  #20
-   [-1, 1, SPPF, [1024, 5]],  # 9
-  ]
+# # YOLOv5 v6.0 backbone
+# backbone:
+#   # [from, number, module, args]
+#   [[-1, 1, Conv, [64, 6, 2, 2]],  # 0-P1/2  320
+#    [-1, 1, Conv, [128, 3, 2]],  # 1-P2/4   160
+#    [-1, 3, C3, [128]],     #160
+#    [-1, 1, Conv, [256, 3, 2]],  # 3-P3/8  80
+#    [-1, 6, C3, [256]],  #80
+#    [-1, 1, Conv, [512, 3, 2]],  # 5-P4/16  40
+#    [-1, 9, C3, [512]],   #40
+#    [-1, 1, Conv, [1024, 3, 2]],  # 7-P5/32  20
+#    [-1, 3, C3, [1024]],  #20
+#    [-1, 1, SPPF, [1024, 5]],  # 9
+#   ]
 
-# YOLOv5 v6.0 head
-head:
-  [[4, 1, Conv, [64, 1, 1]], # 80 80
-  [6, 1, Conv, [128, 1, 1]],  # 40 40
-  [9, 1, Conv, [256, 1, 1]],  #20 20
+# # YOLOv5 v6.0 head
+# head:
+#   [[4, 1, Conv, [64, 1, 1]], # 80 80
+#   [6, 1, Conv, [128, 1, 1]],  # 40 40
+#   [9, 1, Conv, [256, 1, 1]],  #20 20
 
-  [10, 1, Conv, [64, 1, 1]],  # 13 80 80
-  [11, 1, Conv, [128, 1, 1]], # 14 40 40
-  [12, 1, Conv, [256, 1, 1]], # 15 20 20
+#   [10, 1, Conv, [64, 1, 1]],  # 13 80 80
+#   [11, 1, Conv, [128, 1, 1]], # 14 40 40
+#   [12, 1, Conv, [256, 1, 1]], # 15 20 20
   
-  [[13, 14], 1, ASFF_2, [64, 0]],  #  16 80 80 
-  [[13, 14], 1, ASFF_2, [128, 1]],  #  17 40 40
+#   [[13, 14], 1, ASFF_2, [64, 0]],  #  16 80 80 
+#   [[13, 14], 1, ASFF_2, [128, 1]],  #  17 40 40
 
-  [16, 1, BasicBlock, [64]],  # 18 80 80
-  [17, 1, BasicBlock, [128]], # 19 40 40
+#   [16, 3, BasicBlock_n, [64]],  # 18 80 80
+#   [17, 3, BasicBlock_n, [128]], # 19 40 40
 
-  [[18, 19, 15], 1, ASFF_3, [64, 0]],  # 20
-  [[18, 19, 15], 1, ASFF_3, [128, 1]], # 21
-  [[18, 19, 15], 1, ASFF_3, [256, 2]], # 22
+#   [[18, 19, 15], 1, ASFF_3, [64, 0]],  # 20
+#   [[18, 19, 15], 1, ASFF_3, [128, 1]], # 21
+#   [[18, 19, 15], 1, ASFF_3, [256, 2]], # 22
 
-  [20, 1, BasicBlock, [64]],  #23
-  [21, 1, BasicBlock, [128]], #24
-  [22, 1, BasicBlock, [256]], #25
+#   [20, 9, BasicBlock_n, [64]],  #23
+#   [21, 9, BasicBlock_n, [128]], #24
+#   [22, 9, BasicBlock_n, [256]], #25
 
-  [23, 1, Conv, [256, 1, 1]], #26
-  [24, 1, Conv, [512, 1, 1]], #27
-  [25, 1, Conv, [1024, 1, 1]], #28
+#   [23, 1, Conv, [256, 1, 1]], #26
+#   [24, 1, Conv, [512, 1, 1]], #27
+#   [25, 1, Conv, [1024, 1, 1]], #28
 
-  [[26, 27, 28], 1, Detect, [nc, anchors]],
-  ]
+#   [[26, 27, 28], 1, Detect, [nc, anchors]],
+#   ]
 #==================yolo.py=====================================
-if m in [Conv, GhostConv, BasicBlock]:
+# if m in [Conv, GhostConv, BasicBlock_n]:
+#     c1, c2 = ch[f], args[0]
+#     if c2 != no:  # if not output
+#         c2 = make_divisible(c2 * gw, 8)
 
-elif m is ASFF_2:
-            c1, c2 = [ch[f[0]], ch[f[1]]], args[0]
-            if c2 != no:  # if not output
-                c2 = make_divisible(c2 * gw, 8)
-            args = [c1, c2, *args[1:]]
-elif m is ASFF_3:
-            c1, c2 = [ch[f[0]], ch[f[1]], ch[f[2]]], args[0]
-            if c2 != no:  # if not output
-                c2 = make_divisible(c2 * gw, 8)
-            args = [c1, c2, *args[1:]]
+#      args = [c1, c2, *args[1:]] #q: *args[1:]?   
+#     if m in [BasicBlock_n]:
+#         args.insert(2, n)  # number of repeats
+#         n = 1
+# elif m is ASFF_2:
+#     c1, c2 = [ch[f[0]], ch[f[1]]], args[0]
+#     if c2 != no:  # if not output
+#         c2 = make_divisible(c2 * gw, 8)
+#     args = [c1, c2, *args[1:]]
+# elif m is ASFF_3:
+#     c1, c2 = [ch[f[0]], ch[f[1]], ch[f[2]]], args[0]
+#     if c2 != no:  # if not output
+#         c2 = make_divisible(c2 * gw, 8)
+#     args = [c1, c2, *args[1:]]
