@@ -267,26 +267,40 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 , none_dense_concat, head_none_dense_concat, Partial_conv3, GhostPModule, GhostPBottleneck, C3GhostP, GhostELAN, GhostBottleneckELANStack
                 , GhostELANFPN, GhostBottleneckELANStack1, GhostBottleneckELANStack2, GhostBottleneckELANStack3, GhostConv_add_concat, 
                 GAhostBottleneckELANStack1, GAhostBottleneckELANStack2, GAhostBottleneckELANStack3, GhostELANFPNv2, C3Ghost_GAConv, GAhostBottleneckELANStack1_ema
-                , GhostELANFPNEMA]:
+                , GhostELANFPNEMA, BasicBlock, GAhostBottleneckELANStackn]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]] #q: *args[1:]?   
             if m in [BottleneckCSP, C3, C3TR, C3Ghost, none_dense_ghostcsp, GhostBottleneckStack, Ghost_shuffle_BottleneckStack, C3GhostFpn, none_dense_concat
-                     , head_none_dense_concat, C3GhostP, GhostBottleneckELANStack, C3Ghost_GAConv]:
+                     , head_none_dense_concat, C3GhostP, GhostBottleneckELANStack, C3Ghost_GAConv, GAhostBottleneckELANStackn]:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         # elif m is ASFF:
         #     c2 = sum(ch[x] for x in f) // len(f)
+        elif m is Split_1:           
+            c2 = ch[f] // 8      
+        elif m is Split_2:
+            c2 = ch[f] - ch[f] // 8   
+        elif m in [ASFF_2]:
+            c1, c2 = [ch[f[0]], ch[f[1]]], args[0]
+            if c2 != no:  # if not output
+                c2 = make_divisible(c2 * gw, 8)
+            args = [c1, c2, *args[1:]]
+        elif m in [ASFF_3]:
+            c1, c2 = [ch[f[0]], ch[f[1]], ch[f[2]]], args[0]
+            if c2 != no:  # if not output
+                c2 = make_divisible(c2 * gw, 8)
+            args = [c1, c2, *args[1:]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         elif m in[BiFPN_Add2, BiFPN_Add3]:
             # c1 = max([ch[x] for x in f])
             c2 = max([ch[x] for x in f])
-        elif m is Add:
+        elif m in [Add, Avg, Mul]:
             c2 = sum(ch[x] for x in f) // len(f)
         elif m is CARAFE:
             c2 = ch[f]
