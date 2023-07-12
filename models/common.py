@@ -593,6 +593,38 @@ class GAhostBottleneckELANStack1(nn.Module):
         x2 = self.cv2(x)
         x3 = self.m1(x1)
         return self.se(self.cv3(torch.cat((x1, x2, x3), 1)))
+class GAhostBottleneckELANStackn(nn.Module):
+    def __init__(self, c1, c2, n=1, k=3, s=1):
+        super().__init__()
+
+        c_ = c2 // 4
+        self.n = n
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1, act=False)
+        self.cv3 = Conv((2*n+2)*c_, c2, 1)
+
+        self.m = nn.ModuleList()
+        self.m1 = GAhostBottleneck(c_, 2*c_)
+        if n > 1:
+            for _ in range(n - 1):
+                self.m.append(GAhostBottleneck(2*c_, 2*c_))
+        # self.se = SeBlock(c2)
+        # self.ema = EMA(c2)
+
+    def forward(self, x):
+        x1 = self.cv1(x)
+        x2 = self.cv2(x)
+        x3 = self.m1(x1)
+        output = x3
+        if self.n > 1:
+            for m_ in self.m:
+                x4 = m_(x3)
+                output = torch.cat((output, x4), 1)
+                x3 = x4
+            x3 = output
+        #return self.se(self.cv3(torch.cat((x1, x2, x3), 1)))
+        # return self.ema(self.cv3(torch.cat((x1, x2, x3), 1)))
+        return self.cv3(torch.cat((x1, x2, x3), 1))
 
 class GAhostBottleneckELANStack1_ema(nn.Module):
     def __init__(self, c1, c2, k=3, s=1):
@@ -667,7 +699,183 @@ class GhostELANFPNv2(nn.Module):
         x4 = self.cv4(x3)
         x = torch.cat([x1, x2 + x1, x3, x4], 1)
         return self.cv5(x)
+
+class Upsample(nn.Module):
+    def __init__(self, in_channels, out_channels, scale_factor=2):
+        super().__init__()
+
+        self.upsample = nn.Sequential(
+            Conv(in_channels, out_channels, 1),
+            nn.Upsample(scale_factor=scale_factor, mode='bilinear')
+        )        
+    def forward(self, x):
+        x = self.upsample(x)
+        return x
     
+class Downsample_x2(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.downsample = nn.Sequential(
+            Conv(in_channels, out_channels, 2, 2, 0)
+        )
+    
+    def forward(self, x):
+        x = self.downsample(x)
+        return x
+    
+class Downsample_x4(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.downsample = nn.Sequential(
+            Conv(in_channels, out_channels, 4, 4, 0)
+        )
+    
+    def forward(self, x):
+        x = self.downsample(x)
+        return x
+
+class ASFF_2(nn.Module):
+    def __init__(self, c1, c2, level=0):
+        super().__init__()
+        c1_l, c1_h = c1[0], c1[1]
+        self.level = level
+        self.dim = [
+            c1_l,
+            c1_h
+        ]
+        self.inter_dim = self.dim[self.level]
+        compress_c = 8
+
+        if level == 0:
+            # self.compress_level_0 = Conv(c1_l, self.inter_dim, 1)
+            self.stride_level_1 = Upsample(c1_h, self.inter_dim)
+        if level == 1:
+            # self.upsample = Upsample(c1_l, self.inter_dim)
+            # # self.compress_level_0 = Conv(c1_h, self.inter_dim, 1)
+            self.stride_level_0 = Downsample_x2(c1_l, self.inter_dim)
+        
+        self.weight_level_0 = Conv(self.inter_dim, compress_c, 1, 1)
+        self.weight_level_1 = Conv(self.inter_dim, compress_c, 1, 1)
+
+        self.weights_levels = nn.Conv2d(compress_c * 2, 2, kernel_size=1, stride=1, padding=0)
+        self.conv = Conv(self.inter_dim, self.inter_dim, 3, 1)
+
+    def forward(self, x):
+        x_level_0, x_level_1 = x[0], x[1]
+
+        if self.level == 0:
+            level_0_resized = x_level_0
+            level_1_resized = self.stride_level_1(x_level_1)
+        elif self.level == 1:
+            level_0_resized = self.stride_level_0(x_level_0)
+            level_1_resized = x_level_1
+
+
+        level_0_weight_v = self.weight_level_0(level_0_resized)
+        level_1_weight_v = self.weight_level_1(level_1_resized)
+        levels_weight_v = torch.cat((level_0_weight_v, level_1_weight_v), 1)
+        levels_weight = self.weights_levels(levels_weight_v)
+        levels_weight = F.softmax(levels_weight, dim=1)
+
+        # print(x_level_0.shape, levels_weight[:, 0:1, :, :].shape)
+        fused_out_reduced = level_0_resized * levels_weight[:, 0:1, :, :] + \
+                            level_1_resized * levels_weight[:, 1:2, :, :]
+        out = self.conv(fused_out_reduced)
+
+        return out
+    
+class ASFF_3(nn.Module):
+    def __init__(self, c1, c2, level=0):
+        super().__init__()
+        c1_l, c1_m, c1_h = c1[0], c1[1], c1[2]
+        self.level = level
+        self.dim = [
+            c1_l,
+            c1_m,
+            c1_h
+        ]
+        self.inter_dim = self.dim[self.level]
+        compress_c = 8
+
+        if level == 0:
+            # self.compress_level_0 = Conv(c1_l, self.inter_dim, 1)
+            self.stride_level_1 = Upsample(c1_m, self.inter_dim)
+            self.stride_level_2 = Upsample(c1_h, self.inter_dim, scale_factor=4)
+        if level == 1:
+            # self.upsample = Upsample(c1_l, self.inter_dim)
+            # # self.compress_level_0 = Conv(c1_h, self.inter_dim, 1)
+            self.stride_level_0 = Downsample_x2(c1_l, self.inter_dim)
+            self.stride_level_2 = Upsample(c1_h, self.inter_dim)
+        if level == 2:
+            self.stride_level_0 = Downsample_x4(c1_l, self.inter_dim)
+            self.stride_level_1 = Downsample_x2(c1_m, self.inter_dim)
+        
+        
+        self.weight_level_0 = Conv(self.inter_dim, compress_c, 1, 1)
+        self.weight_level_1 = Conv(self.inter_dim, compress_c, 1, 1)
+        self.weight_level_2 = Conv(self.inter_dim, compress_c, 1, 1)
+
+        self.weights_levels = nn.Conv2d(compress_c * 3, 3, kernel_size=1, stride=1, padding=0)
+        self.conv = Conv(self.inter_dim, self.inter_dim, 3, 1)
+
+    def forward(self, x):
+        x_level_0, x_level_1, x_level_2 = x[0], x[1], x[2]
+        if self.level == 0:
+            level_0_resized = x_level_0
+            level_1_resized = self.stride_level_1(x_level_1)
+            level_2_resized = self.stride_level_2(x_level_2)
+        elif self.level == 1:
+            level_0_resized = self.stride_level_0(x_level_0)
+            level_1_resized = x_level_1
+            level_2_resized = self.stride_level_2(x_level_2)
+        elif self.level == 2:
+            level_0_resized = self.stride_level_0(x_level_0)
+            level_1_resized = self.stride_level_1(x_level_1)
+            level_2_resized = x_level_2
+
+        level_0_weight_v = self.weight_level_0(level_0_resized)
+        level_1_weight_v = self.weight_level_1(level_1_resized)
+        level_2_weight_v = self.weight_level_2(level_2_resized)
+
+        levels_weight_v = torch.cat((level_0_weight_v, level_1_weight_v, level_2_weight_v), 1)
+        levels_weight = self.weights_levels(levels_weight_v)
+        levels_weight = F.softmax(levels_weight, dim=1)
+
+
+        fused_out_reduced = level_0_resized * levels_weight[:, 0:1, :, :] + \
+                            level_1_resized * levels_weight[:, 1:2, :, :] + \
+                            level_2_resized * levels_weight[:, 2:, :, :]
+        
+        out = self.conv(fused_out_reduced)
+
+        return out
+
+class BasicBlock(nn.Module):
+    expansion = 1
+    def __init__(self, c1, c2):
+        super().__init__()
+        self.cv1 = nn.Conv2d(c1, c2, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(c2, momentum=0.1)
+        self.act = nn.SiLU(inplace=True)
+        self.cv2 = nn.Conv2d(c2, c2, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(c2, momentum=0.1)
+    
+    def forward(self, x):
+        residual = x
+
+        x = self.cv1(x)
+        x = self.bn1(x)
+        x = self.act(x)
+
+        x = self.cv2(x)
+        x = self.bn2(x)
+
+        x += residual
+        x = self.act(x)
+
+        return x
+
+
 class GhostELANFPNEMA(nn.Module):
     def __init__(self, c1, c2, k=1, s=1):
         super().__init__()
@@ -1536,6 +1744,24 @@ class Concat(nn.Module):
         #print(x[0].shape, x[1].shape)
         return torch.cat(x, self.d)
 
+class Split_1(nn.Module):  #需要做后续处理的
+    def __init__(self):
+        super().__init__()
+        # self.untouched_dim = c1 - self.dim
+        
+    def forward(self, x):
+        b, c, h, w = x.size()
+        return x[:, :c // 8, :, :]
+    
+class Split_2(nn.Module): #不需要做后续处理
+    def __init__(self):
+        super().__init__()
+        # self.untouched_dim = c1 - self.dim
+        
+    def forward(self, x):
+        b, c, h, w = x.size()
+        return x[:, c // 8:, :, :]
+    
 class Add(nn.Module):
     def __init__(self, dimension=1):
         super().__init__()
@@ -1548,6 +1774,24 @@ class Add(nn.Module):
             sum += i
         return sum
 
+class Avg(nn.Module):
+    def __init__(self, dimension=1):
+        super().__init__()
+        self.d = dimension
+
+    def forward(self, x):
+
+        return (x[0] + x[1]) / 2
+
+class Mul(nn.Module):
+    def __init__(self, dimension=1):
+        super().__init__()
+        self.d = dimension
+
+    def forward(self, x):
+        
+        return x[0] * x[1]
+    
 class DetectMultiBackend(nn.Module):
     # YOLOv5 MultiBackend class for python inference on various backends
     def __init__(self, weights='yolov5s.pt', device=None, dnn=False, data=None):
