@@ -1,4 +1,4 @@
-# YOLOv5 ?? by Ultralytics, GPL-3.0 license
+# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
 """
 YOLO-specific modules
 
@@ -17,8 +17,10 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 # ROOT = ROOT.relative_to(Path.cwd())  # relative
 
-from models.dyhead import *
+
 from models.common import *
+from models.testcommon import *
+from models.neck import *
 from models.experimental import *
 from utils.autoanchor import check_anchor_order
 from utils.general import LOGGER, check_version, check_yaml, make_divisible, print_args
@@ -43,15 +45,11 @@ class Detect(nn.Module):
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
-        # self.dyhead = nn.Sequential(*[DyHeadBlock(ch[0]) for i in range(2)])
         self.register_buffer('anchors', torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
         self.inplace = inplace  # use in-place ops (e.g. slice assignment)
 
     def forward(self, x):
-        # for dyhead_layer in self.dyhead:
-        #     x = dyhead_layer(x)
-
         z = []  # inference output
         for i in range(self.nl):
             x[i] = self.m[i](x[i])  # conv
@@ -111,7 +109,7 @@ class Model(nn.Module):
 
         # Build strides, anchors
         m = self.model[-1]  # Detect()
-        if isinstance(m, (Detect, ASFF_Detect)):
+        if isinstance(m, Detect):
             s = 256  # 2x min stride
             m.inplace = self.inplace
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
@@ -186,7 +184,7 @@ class Model(nn.Module):
         return y
 
     def _profile_one_layer(self, m, x, dt):
-        c = isinstance(m, (Detect, ASFF_Detect))  # is final layer, copy input as inplace fix
+        c = isinstance(m, Detect)  # is final layer, copy input as inplace fix
         o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[0] / 1E9 * 2 if thop else 0  # FLOPs
         t = time_sync()
         for _ in range(10):
@@ -231,13 +229,13 @@ class Model(nn.Module):
         return self
 
     def info(self, verbose=False, img_size=640):  # print model information
-        model_info(self, verbose, img_size)
+        return model_info(self, verbose, img_size)
 
     def _apply(self, fn):
         # Apply to(), cpu(), cuda(), half() to model tensors that are not parameters or registered buffers
         self = super()._apply(fn)
         m = self.model[-1]  # Detect()
-        if isinstance(m, (Detect, ASFF_Detect)):
+        if isinstance(m, Detect):
             m.stride = fn(m.stride)
             m.grid = list(map(fn, m.grid))
             if isinstance(m.anchor_grid, list):
@@ -262,29 +260,30 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, MixConv2d, Focus, CrossConv,
-                 BottleneckCSP, C3, C3TR, C3SPP, C3Ghost, G_bneck, shortcut, ghostbottleneck, ghostbottleneck2, ghostmodule, none_dense_ghostcsp
-                , MLPBlock, GhostBottleneckStack, Ghost_shuffle_Conv, ghost_shuffle_bottleneck, Ghost_shuffle_BottleneckStack, C3GhostFpn, GhostFpnBottleneck
-                , none_dense_concat, head_none_dense_concat, Partial_conv3, GhostPModule, GhostPBottleneck, C3GhostP, GhostELAN, GhostBottleneckELANStack
-                , GhostELANFPN, GhostBottleneckELANStack1, GhostBottleneckELANStack2, GhostBottleneckELANStack3, GhostConv_add_concat, 
-                GAhostBottleneckELANStack1, GAhostBottleneckELANStack2, GAhostBottleneckELANStack3, GhostELANFPNv2, C3Ghost_GAConv, GAhostBottleneckELANStack1_ema
-                , GhostELANFPNEMA, BasicBlock, GAhostBottleneckELANStackn]:
+                 BottleneckCSP, C3, C3TR, C3SPP, C3Ghost, GAConv, BasicBlock_n, GhostELANStack1_ema, VoVGSCSPC, GSConv, GAhostELANStack1_ema
+                 , GhostConv_CSA, GhostConv_ASFF, C3Ghost_ASFF, C3Ghost_CSA, C3_EMSC, C3_ScConv, ScConv, C3_MSG, MSGELAN_ema, MSGConv
+                 , C3Ghost_MSG, C3Ghost_MSG_Group_conv1x1, MSGConv_Group_conv1x1, MSGELAN, MSGAELAN, C3GAhost_MSG]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)
-
             args = [c1, c2, *args[1:]] #q: *args[1:]?   
-            if m in [BottleneckCSP, C3, C3TR, C3Ghost, none_dense_ghostcsp, GhostBottleneckStack, Ghost_shuffle_BottleneckStack, C3GhostFpn, none_dense_concat
-                     , head_none_dense_concat, C3GhostP, GhostBottleneckELANStack, C3Ghost_GAConv, GAhostBottleneckELANStackn]:
+            if m in [BottleneckCSP, C3, C3TR, C3Ghost, BasicBlock_n, VoVGSCSPC, C3Ghost_ASFF, C3Ghost_CSA
+                     , C3_EMSC, C3_ScConv, C3_MSG, C3Ghost_MSG, C3Ghost_MSG_Group_conv1x1, C3GAhost_MSG]:
                 args.insert(2, n)  # number of repeats
                 n = 1
+        elif m is EMA:
+            c2 = ch[f]
+            args = [c2, *args]
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         # elif m is ASFF:
         #     c2 = sum(ch[x] for x in f) // len(f)
         elif m is Split_1:           
-            c2 = ch[f] // 8      
+            c2 = ch[f] // args[0]   
+            args = args   
         elif m is Split_2:
-            c2 = ch[f] - ch[f] // 8   
+            c2 = ch[f] - ch[f] // args[0]
+            args = args       
         elif m in [ASFF_2]:
             c1, c2 = [ch[f[0]], ch[f[1]]], args[0]
             if c2 != no:  # if not output
@@ -297,15 +296,10 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             args = [c1, c2, *args[1:]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
-        elif m in[BiFPN_Add2, BiFPN_Add3]:
-            # c1 = max([ch[x] for x in f])
-            c2 = max([ch[x] for x in f])
-        elif m in [Add, Avg, Mul]:
-            c2 = sum(ch[x] for x in f) // len(f)
         elif m is CARAFE:
             c2 = ch[f]
             args = [c2, *args]
-        elif m in [Detect, ASFF_Detect]:
+        elif m in [Detect]:
         # elif m is Detect:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
@@ -314,15 +308,18 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:
             c2 = ch[f] // args[0] ** 2
+
+        elif m in [CARAFE, CARAFE_MSGConv]:
+            c2 = ch[f]
+            args = [c2, *args]
+
         else:
             c2 = ch[f]
+
         
         m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
-        # for x in m_.parameters():
-        #     print(x.numel())
         np = sum(x.numel() for x in m_.parameters())  # number params
-        
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
         LOGGER.info(f'{i:>3}{str(f):>18}{n_:>3}{np:10.0f}  {t:<40}{str(args):<30}')  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
@@ -332,22 +329,10 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
-class ASFF_Detect(Detect):
-    def __init__(self, nc=80, anchors=(), ch=(), inplace=True):
-        super().__init__(nc, anchors, ch, inplace)
-        self.nl = len(anchors)  # number of detection layers
-        self.asffs = nn.ModuleList(ASFF(i) for i in range(self.nl))
-        self.detect = Detect.forward
 
-    def forward(self, x):
-        x = x[::-1]
-        for i in range(self.nl):
-            x[i] = self.asffs[i](*x)
-        return self.detect(self, x[::-1])
-    
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='yolov5s.yaml', help='model.yaml')
+    parser.add_argument('--cfg', type=str, default='/home/ubuntu/tzy/yolov5s/models/neck_yaml/split-gfpn.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true', help='profile model speed')
     parser.add_argument('--test', action='store_true', help='test all yolo*.yaml')
